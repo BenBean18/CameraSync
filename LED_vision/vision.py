@@ -130,7 +130,14 @@ def deskew(i: cv2.Mat):
 
 #32,46 -> 1300,120
 
-def processFrame(frame: cv2.Mat):
+def clamp(val, a, b):
+    if val < a:
+        return a
+    if val > b:
+        return b
+    return val
+
+def processFrame(frame: cv2.Mat, drawLEDLines: bool = False):
     start = time.time()
     orig = frame
     # cv2.imshow("Original", frame)
@@ -140,6 +147,8 @@ def processFrame(frame: cv2.Mat):
         frame = deskewed
     # cv2.imshow("Deskewed", frame)
     # cv2.waitKey(1)
+    xOffset = 0.05 # must be +
+    xLength = 0.97
     if deskewed is None:
         # deskewing does rotation so only spend CPU time doing this if it's None
         ((num01, corners01, ids01), ppm01, angle01) = charuco(frame, ids=[0, 1]) # right
@@ -166,8 +175,6 @@ def processFrame(frame: cv2.Mat):
 
         mToTop = -0.20
         mToBottom = 0.07
-        xOffset = -0.02
-        xLength = 0.98
         # Should be able to put all of this within deskewing code -- just crop image properly
         if (corners01 is None or len(corners01) == 0) and (corners23 is None or len(corners23) == 0):
             # print(":( no ArUco markers found")
@@ -221,7 +228,8 @@ def processFrame(frame: cv2.Mat):
         frame = frame[minY:maxY, minX:maxX]
     else:
         # frame = frame[36:96, 50:1000] # if it's deskewed this should be constant and saves CPU time doing costly ArUco detection
-        frame = frame[36:96, 40:1010] # if it's deskewed this should be constant and saves CPU time doing costly ArUco detection
+        h, w, *_ = frame.shape
+        frame = frame[36:96, clamp(int((xOffset*1000)), 0, w):clamp(int(xOffset*1000+xLength*1000), 0, w)] # if it's deskewed this should be constant and saves CPU time doing costly ArUco detection
     try:
         strip0 = getStrip(frame, 0)
         idx = 0
@@ -239,6 +247,16 @@ def processFrame(frame: cv2.Mat):
                 # frame = cv2.circle(frame, (int(idx/60 * (maxX - minX)), int(((maxY - minY) - 10))), 10, (255, 255, 255), -1)
                 oneIndices.append(led)
             idx += 1
+        if drawLEDLines:
+            h, w_, *_ = frame.shape
+            w = getLEDWidth(frame)
+            # w = 5
+            g = getLEDGap(frame)
+            # g = (w_ - (5 * 60)) / 59
+            for ledNum in range(60):
+                minPos = int((w + g) * ledNum)
+                maxPos = int(minPos + w + g)
+                frame = cv2.rectangle(frame, (minPos, 0), (maxPos, h), (255,255,255), 1)
         return (zeroIndices, oneIndices, frame)
     except Exception as e:
         print("Sadness", e)
@@ -247,7 +265,7 @@ def processFrame(frame: cv2.Mat):
 #doStuff()
 #cProfile.run("doStuff()")
 
-def mainloop(cap: cv2.VideoCapture, debug: bool = False):
+def mainloop(cap: cv2.VideoCapture, debug: bool = False, drawLines: bool = False, bw: bool = False):
     # use readAllAtOnce for videos & disable for live camera
     lastTimestamp = 0
     deltas = []
@@ -259,6 +277,7 @@ def mainloop(cap: cv2.VideoCapture, debug: bool = False):
     frames = 0
     stop = False
     epsilon = 0.0001
+    lastFrameGood = True
     while True:
         frames += 1
         #print(frames)
@@ -293,7 +312,8 @@ def mainloop(cap: cv2.VideoCapture, debug: bool = False):
                 else:
                     print("Speed:", f"{1/(time.time() - start):.4f}fps", "Timestamp:", f"{ts:.4f}", "Δ:", f"{delta:.4f}", "Diff:", f"{(time.time() - start) - delta:.4f}", "Shutter:", f"{len(zeroIndices)*(3/1000):.4f}ms", end="\r")
                 # if delta is too high and it's not right at the end (red + green is harder to detect so might be seen as dropped)
-                if delta > math.ceil(1/60 * (1000/3)) * (3/1000) + epsilon and not 59 in zeroIndices and not 58 in zeroIndices and not 57 in zeroIndices and not 0 in zeroIndices and not 1 in zeroIndices and not 2 in zeroIndices:
+                # also, if the last frame was unreadable, the next one will be a drop so ignore if so
+                if delta > math.ceil(1/60 * (1000/3)) * (3/1000) + epsilon and not 59 in zeroIndices and not 58 in zeroIndices and not 57 in zeroIndices and not 0 in zeroIndices and not 1 in zeroIndices and not 2 in zeroIndices and lastFrameGood:
                     if debug:
                         print("\n****DROPPED****", frames, "Speed:", f"{1/(time.time() - start):.4f}fps", "Timestamp:", f"{ts:.4f}", "Δ:", f"{delta:.4f}", "Mean Δ (25%-75%):", f"{np.mean(sortedDeltas[int(sortedDeltas.size*0.25):int(sortedDeltas.size*0.75)]):.4f}", "Diff:", f"{(time.time() - start) - delta:.4f}", "Shutter:", f"{len(zeroIndices)*(3/1000):.4f}ms")
                     else:
@@ -312,19 +332,39 @@ def mainloop(cap: cv2.VideoCapture, debug: bool = False):
                 pass
             lastTimestamp = ts
             if debug:
-                cv2.imshow("LEDs", frame)
+                if bw:
+                    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+                    frame_threshold = cv2.inRange(hsv, (0, 0, 250), (30, 255, 255)) # value min was 245 but this works better
+                    frame_threshold = cv2.bitwise_or(frame_threshold, cv2.inRange(hsv, (170, 0, 250), (180, 255, 255))) # value min was 245 but this works better
+                    eroded = cv2.erode(frame_threshold, None, iterations = 0)
+                    h, w_, *_ = frame.shape
+                    w = getLEDWidth(frame)
+                    # w = 5
+                    g = getLEDGap(frame)
+                    # g = (w_ - (5 * 60)) / 59
+                    for ledNum in range(60):
+                        minPos = int((w + g) * ledNum)
+                        maxPos = int(minPos + w + g)
+                        eroded = cv2.rectangle(eroded, (minPos, 0), (maxPos, h), (255,255,255), 1)
+                    cv2.imshow("LEDs", eroded)
+                else:
+                    cv2.imshow("LEDs", frame)
                 if not stop:
                     k = cv2.waitKey(1)
                 else:
                     k = cv2.waitKey(0)
                 if k == ord('q'):
+                    stop = False
                     return
                 if k == ord(' '):
                     cv2.waitKey(0)
+                    stop = False
                 if k == ord('n'):
                     stop = True
+            lastFrameGood = True
         except Exception as e:
             print(e, "Couldn't find LEDs")
+            lastFrameGood = False
             pass
     print(f"{dropped}/{frames} dropped frames ({round(dropped / frames * 100)}%)")
 

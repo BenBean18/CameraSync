@@ -63,17 +63,17 @@ def getLEDSlice(img_: cv2.Mat, ledNum: int, stripNum: int, w, g):
 # Choose your own adventure:
 
 # 1. Looks for all colors. EXPECTS HSV
-def isOn(hsv: cv2.Mat):
-    frame_threshold = cv2.inRange(hsv, (0, 0, 250), (180, 154, 255)) # value min was 245 but this works better
-    eroded = cv2.erode(frame_threshold, None, iterations = 2) # Changing it to no erosion (iterations = 0) REALLY helped
-    return cv2.countNonZero(eroded) > 0
+# def isOn(hsv: cv2.Mat):
+#     frame_threshold = cv2.inRange(hsv, (0, 0, 250), (180, 154, 255)) # value min was 245 but this works better
+#     eroded = cv2.erode(frame_threshold, None, iterations = 2) # Changing it to no erosion (iterations = 0) REALLY helped
+#     return cv2.countNonZero(eroded) > 0
 
 # 2. Just looks for red. EXPECTS HSV. Doesn't work as well -- false positive dropped frames
-# def isOn(hsv: cv2.Mat):
-#     frame_threshold = cv2.inRange(hsv, (0, 0, 250), (30, 255, 255)) # value min was 245 but this works better
-#     frame_threshold = cv2.bitwise_or(frame_threshold, cv2.inRange(hsv, (170, 0, 250), (180, 154, 255))) # value min was 245 but this works better
-#     eroded = cv2.erode(frame_threshold, None, iterations = 1)
-#     return cv2.countNonZero(eroded) > 0
+def isOn(hsv: cv2.Mat):
+    frame_threshold = cv2.inRange(hsv, (0, 0, 250), (30, 255, 255)) # value min was 245 but this works better
+    frame_threshold = cv2.bitwise_or(frame_threshold, cv2.inRange(hsv, (170, 0, 250), (180, 255, 255))) # value min was 245 but this works better
+    eroded = cv2.erode(frame_threshold, None, iterations = 0)
+    return cv2.countNonZero(eroded) > 0
 
 # def getStrip(img: cv2.Mat, ledStrip: int):
 #     w = getLEDWidth(img)
@@ -86,7 +86,7 @@ def getStrip(img: cv2.Mat, ledStrip: int):
     w = getLEDWidth(img)
     g = getLEDGap(img)
     h = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    on = [i if isOn(getLEDSlice(h, i, ledStrip, w, g)) else 0 for i in range(60)]
+    on = [i+1 if isOn(getLEDSlice(h, i, ledStrip, w, g)) else 0 for i in range(59)]
     return on
 
 def x(contour):
