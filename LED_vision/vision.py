@@ -4,6 +4,7 @@ from get_time import *
 import cProfile
 # set up video capture object
 cap = cv2.VideoCapture("IMG_9081.MOV")
+cap2 = cv2.VideoCapture("IMG_9082.MOV")
 
 aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
 aruco_params = cv2.aruco.DetectorParameters_create()
@@ -421,3 +422,51 @@ def asyncMainloop(cap: cv2.VideoCapture, debug: bool = False):
 start = time.time()
 cProfile.run("mainloop(cap, True)", sort="cumtime") # sort by longest time first
 print(time.time() - start)
+
+cap.set(0, 1)
+
+def getTimestampIfNotOnEnd(frame):
+    try:
+        (zeroIndices, oneIndices, frame) = processFrame(frame)
+        # first need to find offset between 3 and 25 before using
+        ts = timestamp(zeroIndices[0], 0)
+        if not 59 in zeroIndices and not 58 in zeroIndices and not 57 in zeroIndices and not 0 in zeroIndices and not 1 in zeroIndices and not 2 in zeroIndices:
+            return ts
+        else:
+            return None
+    except:
+        return None
+
+# actual: 9081 is a bit ahead
+def videoCompare(cap1: cv2.VideoCapture, cap2: cv2.VideoCapture):
+    # Prints out (cap1 - cap2)
+    last1 = 0
+    last2 = 0
+    while True:
+        ret, frame1 = cap1.read()
+        if not ret:
+            print("error with image")
+            break
+        ret, frame2 = cap2.read()
+        if not ret:
+            print("error with image")
+            break
+        ts1 = getTimestampIfNotOnEnd(frame1)
+        
+        ts2 = getTimestampIfNotOnEnd(frame2)
+        
+        if ts1 != None and ts2 != None:
+            # 58 b/c ignoring 0 and 59, see bottom of processFrame
+            delta1 = (ts1 - last1) % (3*58/1000)
+            t1 = last1 + delta1
+            delta2 = (ts2 - last2) % (3*58/1000)
+            t2 = last2 + delta2
+            # if you do  % (3*58/1000) on the difference, then it will work better (e.g. if frame 1 drops out for a bit, messing up the absolute timestamp)
+            # but ONLY IF video 1 is actually ahead
+            print(f"#1: {t1:.4f}, #2: {t2:.4f}, #1 - #2: {(t1-t2):.4f}", end="\n")
+            last1 = t1
+            last2 = t2
+        else:
+            print("none")
+
+videoCompare(cap, cap2)
