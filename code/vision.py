@@ -6,65 +6,80 @@ import cProfile
 cap = cv2.VideoCapture("./LED_vision/IMG_9081.MOV")
 cap2 = cv2.VideoCapture("./LED_vision/IMG_9082.MOV")
 
-aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
-aruco_params = cv2.aruco.DetectorParameters_create()
-# aruco_params.maxErroneousBitsInBorderRate = 1.0
-aruco_params.useAruco3Detection = False
-aruco_params.polygonalApproxAccuracyRate = 0.02
-aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-aruco_params.cornerRefinementMinAccuracy = 0.02 # orig 0.02
-aruco_params.errorCorrectionRate = 1.0 # orig 1.0
-
-def charuco(frame, ids = [0, 1]):
-    # aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
-    board = cv2.aruco.CharucoBoard_create(2, 2, 0.084, 0.066, aruco_dict)
-    board.ids = ids
-    # aruco_params = cv2.aruco.DetectorParameters_create()
+class TagDetector:
+    aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+    aruco_params = cv2.aruco.DetectorParameters_create()
     # aruco_params.maxErroneousBitsInBorderRate = 1.0
-    # aruco_params.useAruco3Detection = False
-    # aruco_params.polygonalApproxAccuracyRate = 0.05
-    # aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-    # aruco_params.cornerRefinementMinAccuracy = 0.02
-    # aruco_params.errorCorrectionRate = 1
-    (corners, ids, rejected) = cv2.aruco.detectMarkers(frame, aruco_dict, parameters=aruco_params)
-    avgPixelsPerAruco = 0
-    avgAngle = 0
-    # 0 1
-    #  x
-    # 3 2
-    if len(corners) > 0:
+    aruco_params.useAruco3Detection = False
+    aruco_params.polygonalApproxAccuracyRate = 0.02
+    aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+    aruco_params.cornerRefinementMinAccuracy = 0.02 # orig 0.02
+    aruco_params.errorCorrectionRate = 1.0 # orig 1.0
+
+    def pixelsPerMeterAndAngle(corners):
+        """
+        Given the corners of a ChArUco board, return the angle of the board 
+        and the number of pixels per meter (assuming the tags are 6.6cm across)
+
+        * `corners`: the corners of the board
+        """
+        avgPixelsPerAruco = 0
+        avgAngle = 0
         for corns in corners:
-            # print(corns)
             avgPixelsPerAruco += abs((corns[0][1]-corns[0][0])[0]) + abs((corns[0][2]-corns[0][3])[0])
             avgPixelsPerAruco += abs((corns[0][3]-corns[0][0])[1]) + abs((corns[0][2]-corns[0][1])[1])
             avgAngle += math.atan2((corns[0][1]-corns[0][0])[1], (corns[0][1]-corns[0][0])[0])
         avgPixelsPerAruco /= len(corners) * 4
         avgAngle /= len(corners)
-        pixelsPerMeter = avgPixelsPerAruco / 0.066
-        return (cv2.aruco.interpolateCornersCharuco(corners, ids, frame, board), pixelsPerMeter, avgAngle)
-    else:
-        return ((0, corners, ids), 0, 0)
+        return (avgPixelsPerAruco / 0.066, avgAngle)
 
-def aruco(frame):
-    (corners, ids, rejected) = cv2.aruco.detectMarkers(frame, aruco_dict, parameters=aruco_params)
-    return (corners, ids)
+    def charuco(frame, ids = [0, 1]):
+        """
+        Detect a ChArUco board.
 
-# https://stackoverflow.com/questions/9041681/opencv-python-rotate-image-by-x-degrees-around-specific-point
-def rotate_image(image, angle):
-    image_center = tuple(np.array(image.shape[1::-1]) / 2)
-    rot_mat = cv2.getRotationMatrix2D(image_center, angle, 1.0)
-    result = cv2.warpAffine(image, rot_mat, image.shape[1::-1], flags=cv2.INTER_LINEAR)
-    return result
+        2x2, where each tag is 6.6cm across & each square is 8.4cm across.
 
-# need to somehow combine aruco detection in deskew and charuco...
+        Returns ((number of tags, corners, ids), pixels per meter, angle of tags)
+
+        * `frame`: the input image
+        * `ids`: the IDs of the ArUco markers
+        """
+        board = cv2.aruco.CharucoBoard_create(2, 2, 0.084, 0.066, TagDetector.aruco_dict)
+        board.ids = ids
+        (corners, ids, rejected) = cv2.aruco.detectMarkers(frame, TagDetector.aruco_dict, parameters=TagDetector.aruco_params)
+        avgPixelsPerAruco = 0
+        avgAngle = 0
+        # corner ids:
+        # 0 1
+        #  x
+        # 3 2
+        if len(corners) > 0:
+            pixelsPerMeter, avgAngle = TagDetector.pixelsPerMeterAndAngle(corners)
+            return (cv2.aruco.interpolateCornersCharuco(corners, ids, frame, board), pixelsPerMeter, avgAngle)
+        else:
+            return ((0, corners, ids), 0, 0)
+
+    def aruco(frame):
+        """
+        Detects ArUco markers.
+
+        * `frame`: the input image
+        """
+        (corners, ids, rejected) = cv2.aruco.detectMarkers(frame, TagDetector.aruco_dict, parameters=TagDetector.aruco_params)
+        return (corners, ids)
 
 lastAruco = (None, None)
 
 def deskew(i: cv2.Mat):
+    """
+    Return a deskewed, cropped version of `i`.
+
+    * `i`: the input image
+    """
     global lastAruco
     # only run detection every other frame
     if lastAruco == (None, None):
-        (corners, ids) = aruco(i)
+        (corners, ids) = TagDetector.aruco(i)
         lastAruco = (corners, ids)
     else:
         (corners, ids) = lastAruco
@@ -97,39 +112,7 @@ def deskew(i: cv2.Mat):
         i2 = cv2.warpPerspective(i, ptf, (1200, 350), flags=cv2.INTER_LINEAR)
         return i2
     except Exception as e:
-        # print("Couldn't deskew:", e)
         pass
-    # corn = corners[2]
-    # for line in [[1,0],[2,1],[2,3],[3,0]]:
-    #     (xDif, yDif) = corn[0][line[0]] - corn[0][line[1]]
-    #     avgHypot += math.hypot(xDif, yDif)
-    # avgHypot /= len(corn[0])
-    # print(avgHypot)
-    # cornTL = corn[0][0]
-    # cornTR = cornTL + (avgHypot, 0)
-    # cornBR = cornTL + (avgHypot, avgHypot)
-    # cornBL = cornTL + (0, avgHypot)
-    # newCorn = np.float32([cornTL, cornTR, cornBR, cornBL])
-    # print(corn[0], newCorn)
-    # ptf = cv2.getPerspectiveTransform(corn[0], newCorn)
-    # i2 = cv2.warpPerspective(i, ptf, i.shape[:2], flags=cv2.INTER_LINEAR)
-
-    # need to do:
-    # id2 TL
-    # id0 TL
-    # id1 BR
-    # id3 BR
-
-    # dest:
-    # 1 pixel per millimeter
-    # (0, 150)
-    # (970, 165)
-    # (1050, 315)
-    # (150, 280)
-
-    # 965 x 330
-
-#32,46 -> 1300,120
 
 def clamp(val, a, b):
     if val < a:
@@ -139,99 +122,28 @@ def clamp(val, a, b):
     return val
 
 def processFrame(frame: cv2.Mat, drawLEDLines: bool = False):
-    start = time.time()
-    orig = frame
-    # cv2.imshow("Original", frame)
-    # cv2.waitKey(1)
+    """
+    Processes a frame and returns the positions of LEDs in both strips.
+
+    Returns (`strip0Indices`, `strip1Indices`, `deskewed_cropped_image`)
+
+    * `frame`: input image
+    * `drawLEDLines`: if true, draws vertical lines where LEDs are on the image
+    """
     deskewed = deskew(frame)
     if not deskewed is None:
         frame = deskewed
-    # cv2.imshow("Deskewed", frame)
-    # cv2.waitKey(1)
+    
     xOffset = 0.05 # must be +
     xLength = 0.97
     if deskewed is None:
-        # deskewing does rotation so only spend CPU time doing this if it's None
-        ((num01, corners01, ids01), ppm01, angle01) = charuco(frame, ids=[0, 1]) # right
-        ((num23, corners23, ids23), ppm23, angle23) = charuco(frame, ids=[2, 3]) # left
-
-        if (corners01 is None or len(corners01) == 0) and (corners23 is None or len(corners23) == 0):
-            angle = 0
-        elif (corners01 is None or len(corners01) == 0):
-            angle = angle23
-        elif (corners23 is None or len(corners23) == 0):
-            angle = angle01
-        else:
-            angle = angle23 * 0.1 + angle01 * 0.1 + math.atan2(corners01[0][0][1] - corners23[0][0][1], corners01[0][0][0] - corners23[0][0][0]) * 0.8
-
-        aAngle = math.degrees(angle)
-
-        frame = rotate_image(frame, aAngle)
-
-        ((num01, corners01, ids01), ppm01, angle01) = charuco(frame, ids=[0, 1]) # right
-        ((num23, corners23, ids23), ppm23, angle23) = charuco(frame, ids=[2, 3]) # left
-
-        # frame = cv2.aruco.drawDetectedCornersCharuco(frame, corners01, ids01)
-        # frame = cv2.aruco.drawDetectedCornersCharuco(frame, corners23, ids23)
-
-        mToTop = -0.20
-        mToBottom = 0.07
-        # Should be able to put all of this within deskewing code -- just crop image properly
-        if (corners01 is None or len(corners01) == 0) and (corners23 is None or len(corners23) == 0):
-            # print(":( no ArUco markers found")
-            return (None, None, None)
-        elif (corners01 is None or len(corners01) == 0):
-            angle = angle23
-            if deskewed is None:
-                pixelsPerMeter = ppm23
-            else:
-                pixelsPerMeter = 1000
-            minX = int(corners23[0][0][0] - pixelsPerMeter * 0.06 + pixelsPerMeter * xOffset)
-            minX = minX if minX >= 0 else 0
-            # 8 cm to the top of the checkerboard and about 10 cm more to the top of the LED strip
-            minY = int(corners23[0][0][1] + pixelsPerMeter * mToTop)
-            minY = minY if minY >= 0 else 0
-            maxY = int(minY + pixelsPerMeter * mToBottom) # exclude checkerboard
-            maxX = int(minX + pixelsPerMeter * xLength)
-        elif (corners23 is None or len(corners23) == 0):
-            angle = angle01
-            if deskewed is None:
-                pixelsPerMeter = ppm01
-            else:
-                pixelsPerMeter = 1000
-            minX = int(corners01[0][0][0] - pixelsPerMeter + pixelsPerMeter * xOffset)
-            minX = minX if minX >= 0 else 0
-            # 8 cm to the top of the checkerboard and about 10 cm more to the top of the LED strip
-            minY = int(corners01[0][0][1] + pixelsPerMeter * mToTop)
-            minY = minY if minY >= 0 else 0
-            maxY = int(minY + pixelsPerMeter * mToBottom) # exclude checkerboard
-            maxX = int(minX + pixelsPerMeter * xLength)
-        else:
-            if deskewed is None:
-                pixelsPerMeter = (ppm01 + ppm23)/2 # need to find a way to deskew based on this difference
-            else:
-                pixelsPerMeter = 1000 # ... how did I forget this is true
-            # print(ppm01, ppm23, pixelsPerMeter)
-            # print(pixelsPerMeter)
-            # strip is 1m long
-            minX = int(corners23[0][0][0] - pixelsPerMeter * 0.06 + pixelsPerMeter * xOffset)
-            minX = minX if minX >= 0 else 0
-
-            maxX = int(corners01[0][0][0] + (pixelsPerMeter * (xLength - 1.0)))
-            maxX = maxX if maxX <= frame.shape[1] else frame.shape[1]
-            # 8 cm to the top of the checkerboard and about 10 cm more to the top of the LED strip
-            minY = int((corners01[0][0][1] + pixelsPerMeter * mToTop + corners23[0][0][1] + pixelsPerMeter * mToTop) / 2)
-            minY = minY if minY >= 0 else 0
-            maxY = int(minY + pixelsPerMeter * mToBottom) # exclude checkerboard
-        # print(minY, maxY, minX, maxX)
-        # frame = cv2.circle(frame, (int(minX), int(minY)), 10, (255, 255, 255), -1)
-        # frame = cv2.circle(frame, (int(maxX), int(maxY)), 10, (255, 255, 255), -1)
-        frame = frame[minY:maxY, minX:maxX]
+        return (None, None, None)
     else:
-        # frame = frame[36:96, 50:1000] # if it's deskewed this should be constant and saves CPU time doing costly ArUco detection
+        # Crop deskewed image
         h, w, *_ = frame.shape
         frame = frame[36:96, clamp(int((xOffset*1000)), 0, w):clamp(int(xOffset*1000+xLength*1000), 0, w)] # if it's deskewed this should be constant and saves CPU time doing costly ArUco detection
     try:
+        # Get LEDs on in strip 0
         strip0 = getStrip(frame, 0)
         idx = 0
         zeroIndices = []
@@ -240,6 +152,7 @@ def processFrame(frame: cv2.Mat, drawLEDLines: bool = False):
                 # frame = cv2.circle(frame, (int(idx/60 * (maxX - minX)), int(10)), 10, (255, 255, 255), -1)
                 zeroIndices.append(led)
             idx += 1
+        # Get LEDs on in strip 1
         oneIndices = []
         strip1 = getStrip(frame, 1)
         idx = 0
@@ -248,6 +161,7 @@ def processFrame(frame: cv2.Mat, drawLEDLines: bool = False):
                 # frame = cv2.circle(frame, (int(idx/60 * (maxX - minX)), int(((maxY - minY) - 10))), 10, (255, 255, 255), -1)
                 oneIndices.append(led)
             idx += 1
+        # Draw lines where LEDs are (if applicable)
         if drawLEDLines:
             h, w_, *_ = frame.shape
             w = getLEDWidth(frame)

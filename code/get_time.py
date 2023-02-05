@@ -1,8 +1,11 @@
 import cv2, math
 import numpy as np
 
+STRIP_0_LED_TIME = 3 # ms
+STRIP_1_LED_TIME = 25 # ms
+
 def frameTime(firstLED, lastLED):
-    return (lastLED - firstLED) * (3/1000)
+    return (lastLED - firstLED) * (STRIP_0_LED_TIME/1000)
 
 def timestamp(strip0: int, strip1: int):
     """
@@ -11,7 +14,7 @@ def timestamp(strip0: int, strip1: int):
     * `strip0`: the position of the first LED in the top strip
     * `strip1`: the position of the first LED in the bottom strip
     """
-    return (strip0 * 3/1000) + (strip1 * 25/1000)
+    return (strip0 * STRIP_0_LED_TIME/1000) + (strip1 * STRIP_1_LED_TIME/1000)
 
 def green(img: cv2.Mat):
     """
