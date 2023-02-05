@@ -3,8 +3,8 @@ import numpy as np
 from get_time import *
 import cProfile
 # set up video capture object
-cap = cv2.VideoCapture("IMG_9081.MOV")
-cap2 = cv2.VideoCapture("IMG_9082.MOV")
+cap = cv2.VideoCapture("./LED_vision/IMG_9081.MOV")
+cap2 = cv2.VideoCapture("./LED_vision/IMG_9082.MOV")
 
 aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
 aruco_params = cv2.aruco.DetectorParameters_create()
