@@ -3,7 +3,7 @@ import numpy as np
 from get_time import *
 import cProfile
 # set up video capture object
-cap = cv2.VideoCapture("./LED_vision/IMG_9081.MOV")
+cap = cv2.VideoCapture(1)
 cap2 = cv2.VideoCapture("./LED_vision/IMG_9082.MOV")
 
 class TagDetector:
@@ -180,6 +180,22 @@ def processFrame(frame: cv2.Mat, drawLEDLines: bool = False):
 #doStuff()
 #cProfile.run("doStuff()")
 
+def mainloop_new(cap: cv2.VideoCapture):
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        try:
+            (zeroIndices, oneIndices, frame) = processFrame(frame)
+            zero = zeroIndices[0]
+            one = oneIndices[0]
+            ts = timestamp(zero, one)
+            print(ts, "                                                 ", end="\r")
+        except Exception as e:
+            print(e, "Couldn't find LEDs")
+            lastFrameGood = False
+            pass
+
 def mainloop(cap: cv2.VideoCapture, debug: bool = False, drawLines: bool = False, bw: bool = False):
     # use readAllAtOnce for videos & disable for live camera
     lastTimestamp = 0
@@ -209,42 +225,10 @@ def mainloop(cap: cv2.VideoCapture, debug: bool = False, drawLines: bool = False
                     frame = cv2.circle(frame, ((int(i/60 * frame.shape[1])), int(10)), 10, (255, 255, 255), -1)
                 for i in oneIndices:
                     frame = cv2.circle(frame, ((int(i/60 * frame.shape[1])), int(frame.shape[0] - 10)), 10, (255, 255, 255), -1)
-            new3 = zeroIndices[0]
-            new25 = oneIndices[0]
-            ts3 += (new3 - last3) * (3/1000)
-            ts25 += (new25 - last25) * (25/1000)
-            last3 = new3
-            last25 = new25
-            ts = ts3 # relying on just the 3ms timestamp seems to work ok
-            delta = (ts - lastTimestamp) % (3*58/1000)
-            if delta > 0:
-                if debug:
-                    deltas.append(delta)
-                    if len(deltas) > 100:
-                        deltas = deltas[1:]
-                    sortedDeltas = np.sort(deltas)
-                    print("Speed:", f"{1/(time.time() - start):.4f}fps", "Timestamp:", f"{ts:.4f}", "Δ:", f"{delta:.4f}", "Mean Δ (25%-75%):", f"{np.mean(sortedDeltas[int(sortedDeltas.size*0.25):int(sortedDeltas.size*0.75)]):.4f}", "Diff:", f"{(time.time() - start) - delta:.4f}", "Shutter:", f"{len(zeroIndices)*(3/1000):.4f}ms", end="\r")
-                else:
-                    print("Speed:", f"{1/(time.time() - start):.4f}fps", "Timestamp:", f"{ts:.4f}", "Δ:", f"{delta:.4f}", "Diff:", f"{(time.time() - start) - delta:.4f}", "Shutter:", f"{len(zeroIndices)*(3/1000):.4f}ms", end="\r")
-                # if delta is too high and it's not right at the end (red + green is harder to detect so might be seen as dropped)
-                # also, if the last frame was unreadable, the next one will be a drop so ignore if so
-                if delta > math.ceil(1/60 * (1000/3)) * (3/1000) + epsilon and not 59 in zeroIndices and not 58 in zeroIndices and not 57 in zeroIndices and not 0 in zeroIndices and not 1 in zeroIndices and not 2 in zeroIndices and lastFrameGood:
-                    if debug:
-                        print("\n****DROPPED****", frames, "Speed:", f"{1/(time.time() - start):.4f}fps", "Timestamp:", f"{ts:.4f}", "Δ:", f"{delta:.4f}", "Mean Δ (25%-75%):", f"{np.mean(sortedDeltas[int(sortedDeltas.size*0.25):int(sortedDeltas.size*0.75)]):.4f}", "Diff:", f"{(time.time() - start) - delta:.4f}", "Shutter:", f"{len(zeroIndices)*(3/1000):.4f}ms")
-                    else:
-                        print("\n****DROPPED****", frames, "Speed:", f"{1/(time.time() - start):.4f}fps", "Timestamp:", f"{ts:.4f}", "Δ:", f"{delta:.4f}", "Diff:", f"{(time.time() - start) - delta:.4f}", "Shutter:", f"{len(zeroIndices)*(3/1000):.4f}ms")
-                    dropped += 1
-                    k = cv2.waitKey(0)
-                    if k == ord('q'):
-                        return
-                    if k == ord(' '):
-                        cv2.waitKey(0)
-                    if k == ord('n'):
-                        stop = True
-            else:
-                lastTimestamp = 0
-                print("Timestamp: ", round(ts, 4), "                                    ", end="\r")
-                pass
+            zero = zeroIndices[0]
+            one = oneIndices[0]
+            ts = timestamp(zero, one)
+            print(ts, "                                                 ", end="\r")
             lastTimestamp = ts
             if debug:
                 if bw:
