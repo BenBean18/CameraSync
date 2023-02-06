@@ -180,6 +180,7 @@ def processFrame(frame: cv2.Mat, drawLEDLines: bool = False):
 #doStuff()
 #cProfile.run("doStuff()")
 
+lastTimestamp = 0
 def mainloop_new(cap: cv2.VideoCapture):
     while True:
         ret, frame = cap.read()
@@ -199,16 +200,9 @@ def mainloop_new(cap: cv2.VideoCapture):
 def mainloop(cap: cv2.VideoCapture, debug: bool = False, drawLines: bool = False, bw: bool = False):
     # use readAllAtOnce for videos & disable for live camera
     lastTimestamp = 0
-    deltas = []
-    ts3 = 0
-    ts25 = 0
-    last3 = 0
-    last25 = 0
     dropped = 0
     frames = 0
     stop = False
-    epsilon = 0.0001
-    lastFrameGood = True
     while True:
         frames += 1
         #print(frames)
@@ -222,13 +216,14 @@ def mainloop(cap: cv2.VideoCapture, debug: bool = False, drawLines: bool = False
             (zeroIndices, oneIndices, frame) = processFrame(frame)
             if debug:
                 for i in zeroIndices:
-                    frame = cv2.circle(frame, ((int(i/60 * frame.shape[1])), int(10)), 10, (255, 255, 255), -1)
+                    frame = cv2.circle(frame, ((int(i/60 * frame.shape[1])), int(15)), 15, (255, 255, 255), -1)
                 for i in oneIndices:
-                    frame = cv2.circle(frame, ((int(i/60 * frame.shape[1])), int(frame.shape[0] - 10)), 10, (255, 255, 255), -1)
+                    frame = cv2.circle(frame, ((int(i/60 * frame.shape[1])), int(frame.shape[0] - 15)), 15, (255, 255, 255), -1)
             zero = zeroIndices[0]
-            one = oneIndices[0]
+            one = oneIndices[-1] # last index for this, we want the latest
             ts = timestamp(zero, one)
-            print(ts, "                                                 ", end="\r")
+            dropped += 1 if lastTimestamp > ts else 0
+            print(one, zero, ts, "*" if lastTimestamp > ts else "")
             lastTimestamp = ts
             if debug:
                 if bw:
@@ -254,7 +249,7 @@ def mainloop(cap: cv2.VideoCapture, debug: bool = False, drawLines: bool = False
                     k = cv2.waitKey(0)
                 if k == ord('q'):
                     stop = False
-                    return
+                    break
                 if k == ord(' '):
                     cv2.waitKey(0)
                     stop = False
@@ -367,4 +362,4 @@ def videoCompare(cap1: cv2.VideoCapture, cap2: cv2.VideoCapture):
         else:
             print("none")
 
-videoCompare(cap, cap2)
+#videoCompare(cap, cap2)

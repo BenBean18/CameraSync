@@ -124,7 +124,7 @@ def isOn(hsv: cv2.Mat):
     """
     frame_threshold = cv2.inRange(hsv, (13, 0, 255), (50, 96, 255)) # value min was 245 but this works better
     #frame_threshold = cv2.bitwise_or(frame_threshold, cv2.inRange(hsv, (170, 0, 250), (180, 255, 255))) # value min was 245 but this works better
-    eroded = cv2.erode(frame_threshold, None, iterations = 0)
+    eroded = cv2.erode(frame_threshold, None, iterations = 1)
     return cv2.countNonZero(eroded) > 0
 
 # def getStrip(img: cv2.Mat, ledStrip: int):
