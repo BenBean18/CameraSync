@@ -1,20 +1,33 @@
-import cv2, numpy, math, time
+import cv2, math, time, sys
 import numpy as np
 from get_time import *
 import cProfile
 # set up video capture object
-cap = cv2.VideoCapture(1)
-cap2 = cv2.VideoCapture("./LED_vision/IMG_9082.MOV")
+if len(sys.argv) == 2:
+    cap = cv2.VideoCapture(sys.argv[1])
+else:
+    print("Usage: vision.py <video_filename>")
 
 class TagDetector:
     aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
-    aruco_params = cv2.aruco.DetectorParameters_create()
-    # aruco_params.maxErroneousBitsInBorderRate = 1.0
+    aruco_params = cv2.aruco.DetectorParameters() # DetectorParameters_create() for OpenCV 3
+    aruco_params.maxErroneousBitsInBorderRate = 1.0
     aruco_params.useAruco3Detection = False
-    aruco_params.polygonalApproxAccuracyRate = 0.02
-    aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-    aruco_params.cornerRefinementMinAccuracy = 0.02 # orig 0.02
+    aruco_params.polygonalApproxAccuracyRate = 0.05
+    # aruco_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+    # aruco_params.cornerRefinementMaxIterations = 50 # default 30, higher = less performance but maybe more detection
+    # aruco_params.cornerRefinementMinAccuracy = 0.02 # orig 0.02
+    aruco_params.minMarkerDistanceRate = 0.01
+    # aruco_params.cornerRefinementWinSize = 5 # orig 5
     aruco_params.errorCorrectionRate = 1.0 # orig 1.0
+    aruco_params.minMarkerPerimeterRate = 0.01 # default 0.03
+    aruco_params.minMarkerLengthRatioOriginalImg = 0.01 # default idk
+    # aruco_params.perspectiveRemovePixelPerCell = 1 # default 4
+
+    # aruco_params.adaptiveThreshWinSizeMin = 3
+    # aruco_params.adaptiveThreshWinSizeMax = 23
+    # aruco_params.adaptiveThreshWinSizeStep = 1
+    # aruco_params.adaptiveThreshConstant = 15
 
     def pixelsPerMeterAndAngle(corners):
         """
@@ -65,10 +78,12 @@ class TagDetector:
 
         * `frame`: the input image
         """
-        (corners, ids, rejected) = cv2.aruco.detectMarkers(frame, TagDetector.aruco_dict, parameters=TagDetector.aruco_params)
+        (corners, ids, rejected) = cv2.aruco.detectMarkers(cv2.erode(frame, (1,1), iterations=2), TagDetector.aruco_dict, parameters=TagDetector.aruco_params)
         return (corners, ids)
 
-lastAruco = (None, None)
+# TODO improve apriltag redundancy
+# (e.g. estimate 4th when we only have 3)
+# often we have 3 and a clear picture but don't detect
 
 def deskew(i: cv2.Mat):
     """
@@ -77,13 +92,9 @@ def deskew(i: cv2.Mat):
     * `i`: the input image
     """
     global lastAruco
-    # only run detection every other frame
-    if lastAruco == (None, None):
-        (corners, ids) = TagDetector.aruco(i)
-        lastAruco = (corners, ids)
-    else:
-        (corners, ids) = lastAruco
-        lastAruco = (None, None)
+    # run detection every frame, need it for a mobile camera
+    (corners, ids) = TagDetector.aruco(i)
+    lastAruco = (corners, ids)
     # 0 1
     #  x
     # 3 2
@@ -98,6 +109,17 @@ def deskew(i: cv2.Mat):
         one = corners[np.where(ids == [1])[0][0]]
         two = corners[np.where(ids == [2])[0][0]]
         three = corners[np.where(ids == [3])[0][0]]
+        # ex. (999, 419) (1158, 571) (74, 407) (230, 557)
+        # zero Y ~= two Y
+        # one Y ~= three Y
+        # three X - two X ~= one X - zero X
+
+        # need ((0 && 1) && (2 || 3)) || ((0 || 1) && (2 && 3))
+
+        # 0 = (1X - (3X - 2X), 2Y)
+        # if even: (partnerX - (oppositeBigX - oppositeLittleX), otherEvenY)
+
+        # ex. 
         tl2 = two[0][0]
         tl0 = zero[0][0]
         br1 = one[0][2]
@@ -107,7 +129,14 @@ def deskew(i: cv2.Mat):
         # id0 TL
         # id1 BR
         # id3 BR
-        newRect = np.float32([[50, 150], [950, 165], [1100, 315], [200, 300]])
+
+        # can't duplicate corners, unwarp will fail
+
+        tl2_tf = [50, 150]
+        tl0_tf = [950, 165]
+        br1_tf = [1100, 315]
+        br3_tf = [200, 300]
+        newRect = np.float32([tl2_tf, tl0_tf, br1_tf, br3_tf])
         ptf = cv2.getPerspectiveTransform(oldRect, newRect)
         i2 = cv2.warpPerspective(i, ptf, (1200, 350), flags=cv2.INTER_LINEAR)
         return i2
@@ -212,8 +241,11 @@ def mainloop(cap: cv2.VideoCapture, debug: bool = False, drawLines: bool = False
                 print("error with image")
             break
         start = time.time()
+        origF = frame
         try:
             (zeroIndices, oneIndices, frame) = processFrame(frame)
+            cv2.imshow("a", origF)
+            cv2.waitKey(1)
             if debug:
                 for i in zeroIndices:
                     frame = cv2.circle(frame, ((int(i/60 * frame.shape[1])), int(15)), 15, (255, 255, 255), -1)
@@ -223,7 +255,6 @@ def mainloop(cap: cv2.VideoCapture, debug: bool = False, drawLines: bool = False
             one = oneIndices[-1] # last index for this, we want the latest
             ts = timestamp(zero, one)
             dropped += 1 if lastTimestamp > ts else 0
-            print(one, zero, ts, "*" if lastTimestamp > ts else "")
             lastTimestamp = ts
             if debug:
                 if bw:
@@ -243,23 +274,23 @@ def mainloop(cap: cv2.VideoCapture, debug: bool = False, drawLines: bool = False
                     cv2.imshow("LEDs", eroded)
                 else:
                     cv2.imshow("LEDs", frame)
-                if not stop:
-                    k = cv2.waitKey(1)
-                else:
-                    k = cv2.waitKey(0)
-                if k == ord('q'):
-                    stop = False
-                    break
-                if k == ord(' '):
-                    cv2.waitKey(0)
-                    stop = False
-                if k == ord('n'):
-                    stop = True
             lastFrameGood = True
         except Exception as e:
             print(e, "Couldn't find LEDs")
             lastFrameGood = False
             pass
+        if not stop:
+            k = cv2.waitKey(1)
+        else:
+            k = cv2.waitKey(0)
+        if k == ord('q'):
+            stop = False
+            break
+        if k == ord(' '):
+            cv2.waitKey(0)
+            stop = False
+        if k == ord('n'):
+            stop = True
     print(f"{dropped}/{frames} dropped frames ({round(dropped / frames * 100)}%)")
 
 import threading
@@ -311,55 +342,37 @@ def asyncMainloop(cap: cv2.VideoCapture, debug: bool = False):
         else:
             threading.Thread(target=lambda: print(frames, getTimestamp(frame, True))).start()
 
-# async runs faster and gives timestamp for each image
-start = time.time()
-cProfile.run("mainloop(cap, True)", sort="cumtime") # sort by longest time first
-print(time.time() - start)
+def dumpTimestamps(filename: str):
+    i = 0
+    cap = cv2.VideoCapture(filename)
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    start = time.time()
+    # can't have dot in filename, will mess it up
+    with open(filename.split(".")[0]+"_timestamps.csv", "w") as output_file:
+        output_file.write("frame_number,millisecond_timestamp\n")
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            try:
+                (zeroIndices, oneIndices, frame) = processFrame(frame)
+                zero = zeroIndices[0]
+                one = oneIndices[-1] # last index for this, we want the latest
+                # actually sometimes it incorrectly jumps one forward, so idk
+                # maybe only if there is only one thing in oneIndices?
+                ts = timestamp(zero, one)
+                output_file.write(f"{i},{int(ts * 1000)}\n")
+            except:
+                output_file.write(f"{i},-1\n")
+            i += 1
+            print(f"{str(i).zfill(len(str(total)))}/{total} [{round(i * 100/total, 1)}%] {round(i/(time.time() - start))}fps", end="\r")
 
-cap.set(0, 1)
 
-def getTimestampIfNotOnEnd(frame):
-    try:
-        (zeroIndices, oneIndices, frame) = processFrame(frame)
-        # first need to find offset between 3 and 25 before using
-        ts = timestamp(zeroIndices[0], 0)
-        if not 59 in zeroIndices and not 58 in zeroIndices and not 57 in zeroIndices and not 0 in zeroIndices and not 1 in zeroIndices and not 2 in zeroIndices:
-            return ts
-        else:
-            return None
-    except:
-        return None
+if len(sys.argv) < 3:
+    dumpTimestamps(sys.argv[1])
+else:
+    mainloop(cv2.VideoCapture(sys.argv[1]), True)
 
-# actual: 9081 is a bit ahead
-def videoCompare(cap1: cv2.VideoCapture, cap2: cv2.VideoCapture):
-    # Prints out (cap1 - cap2)
-    last1 = 0
-    last2 = 0
-    while True:
-        ret, frame1 = cap1.read()
-        if not ret:
-            print("error with image")
-            break
-        ret, frame2 = cap2.read()
-        if not ret:
-            print("error with image")
-            break
-        ts1 = getTimestampIfNotOnEnd(frame1)
-        
-        ts2 = getTimestampIfNotOnEnd(frame2)
-        
-        if ts1 != None and ts2 != None:
-            # 58 b/c ignoring 0 and 59, see bottom of processFrame
-            delta1 = (ts1 - last1) % (3*58/1000)
-            t1 = last1 + delta1
-            delta2 = (ts2 - last2) % (3*58/1000)
-            t2 = last2 + delta2
-            # if you do  % (3*58/1000) on the difference, then it will work better (e.g. if frame 1 drops out for a bit, messing up the absolute timestamp)
-            # but ONLY IF video 1 is actually ahead
-            print(f"#1: {t1:.4f}, #2: {t2:.4f}, #1 - #2: {(t1-t2):.4f}", end="\n")
-            last1 = t1
-            last2 = t2
-        else:
-            print("none")
-
-#videoCompare(cap, cap2)
+# im = cv2.imread("./LED_vision/test.png")
+# print(TagDetector.aruco(im))
+# print(processFrame(cv2.imread("./LED_vision/test.png")))
